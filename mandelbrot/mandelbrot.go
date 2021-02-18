@@ -6,7 +6,6 @@ import (
 	"image/color"
 	"log"
 	"math"
-	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -55,7 +54,7 @@ func Mandelbrot(vp *viewport) *gg.Context {
 	for fromLeft := 0; fromLeft < imageSize; fromLeft++ {
 		for fromTop := 0; fromTop < imageSize; fromTop++ {
 			value := vp.pointAt(fromLeft, fromTop)
-			dc.SetColor(grayscale(stepsBeforeDiverge(value)))
+			dc.SetColor(fullColor(stepsBeforeDiverge(value)))
 			dc.SetPixel(fromLeft, fromTop)
 		}
 	}
@@ -73,16 +72,11 @@ func Mandelbrot(vp *viewport) *gg.Context {
 func displayCoords(vp *viewport, dc *gg.Context) {
 	dc.SetColor(color.RGBA{R: 255, A: 255})
 	dc.DrawString(formatComplex128(vp.topLeft), 1, fontHeight)
-	dc.DrawString(formatComplex128(vp.bottomRight), imageSize-150, imageSize-fontHeight)
+	dc.DrawString(fmt.Sprintf("width=%e", vp.width()), imageSize-150, imageSize-fontHeight)
 }
 
 func formatComplex128(value complex128) string {
 	return strconv.FormatComplex(value, 'g', 4, 64)
-}
-
-func grayscale(iter int) color.Color {
-	greyScale := 255 - uint8(255*iter/maxIter)
-	return color.RGBA{R: greyScale, G: greyScale, B: greyScale, A: 255}
 }
 
 func stepsBeforeDiverge(value complex128) int {
@@ -122,64 +116,4 @@ func ParseCli(query string) *viewport {
 		return defaultViewport()
 	}
 	return fromQuery
-}
-
-
-// HTTP server
-
-func handler(w http.ResponseWriter, r *http.Request) {
-	logInfo.Printf("Received request %v", r.URL)
-	vp, parseFailed := parseQueryValues(r.URL.Query())
-	if parseFailed != nil {
-		badRequest(w, parseFailed)
-		return
-	}
-	image := Mandelbrot(vp)
-	w.Header().Add("Content-Type", "image/png")
-	encodeFailed := image.EncodePNG(w)
-	if encodeFailed != nil {
-		logError.Printf("Encoding PNG failed: %s", encodeFailed)
-	}
-}
-
-func parseQueryValues(query url.Values) (*viewport, error) {
-	center := 0 + 0i
-	var badCenter error = nil
-	if centerString := query.Get("center"); centerString != "" {
-		center, badCenter = strconv.ParseComplex(centerString, 64)
-		if badCenter != nil {
-			return nil, badCenter
-		}
-	}
-
-	width := 2.0
-	var badWidth error = nil
-	if widthString := query.Get("width"); widthString != "" {
-		width, badWidth = strconv.ParseFloat(widthString, 64)
-		if badWidth != nil {
-			return nil, badWidth
-		}
-	}
-
-	return &viewport{
-		topLeft: center + complex(-width, width),
-		bottomRight: center + complex(width, -width),
-	}, nil
-}
-
-func badRequest(w http.ResponseWriter, err error) {
-	logError.Printf("Bad request: %v", err)
-	w.WriteHeader(400)
-	_, fatal := fmt.Fprint(w, err.Error())
-	if fatal != nil {
-		w.WriteHeader(500)
-		log.Fatal(fatal)
-	}
-}
-
-func Serve() {
-	addr := ":9000"
-	logInfo.Printf("Listening on %s", addr)
-	http.HandleFunc("/", handler)
-	logError.Fatal(http.ListenAndServe(addr, nil))
 }
